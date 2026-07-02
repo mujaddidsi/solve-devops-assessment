@@ -25,7 +25,6 @@ jobs:
         run: pip install -r app/requirements.txt pytest
 
       - name: Run tests
-        continue-on-error: true
         run: pytest app/
 
       - name: Build and push image
