@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 # Connection settings for a downstream datastore.
 DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "SuperSecret123!")
+DB_PASSWORD = os.environ.get("DB_PASSWORD")
 
 
 @app.route("/")
@@ -19,4 +19,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true")
