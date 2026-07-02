@@ -1,13 +1,16 @@
-FROM python:latest
+FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY . .
+COPY app/requirements.txt .
 
-RUN pip install -r app/requirements.txt
+RUN pip install --no-cache-dir -r app/requirements.txt
 
-ENV DB_PASSWORD=SuperSecret123!
+COPY app/ .
+
+RUN useradd -m appuser
+USER appuser
 
 EXPOSE 8080
 
-CMD ["python", "app/app.py"]
+CMD ["python", "app.py"]
