@@ -2,14 +2,13 @@
 
 ## Overview
 
-This repo runs a stateless Flask API on ECS Fargate behind an ALB. The infrastructure
-plans and the app runs, but was put together carelessly in several areas that would be
-unacceptable in production — particularly around secrets management, IAM permissions,
-network exposure, and deployment safety.
+This repo runs a stateless Flask API on ECS Fargate behind an ALB. It works — but it
+was put together in a hurry and it shows. The biggest problems are credentials leaking
+in places they shouldn't be, an ECS task role with full admin access, and a pipeline
+that happily deploys when tests fail.
 
-I prioritized fixes by real-world risk: hardcoded credentials and overpermissioned IAM
-are the most dangerous, followed by network surface area and pipeline safety. Issues I
-didn't fix are documented below with the reasoning.
+I fixed the highest-risk issues first and documented the rest. The things I left unfixed
+aren't unimportant — I just didn't want to rush them.
 
 ---
 
@@ -96,31 +95,35 @@ and using `--no-cache-dir`.
 
 ## Monitoring & Rollback
 
-To know this service is down: ALB target group health checks will mark tasks unhealthy
-when `/health` stops returning 200 — that's the first signal. CloudWatch Container
-Insights on the ECS cluster surfaces CPU, memory, and task restart counts. An ALB 5xx
-error rate alarm (threshold >1% over 5 minutes) sent to SNS covers the user-facing
-symptom. With structured JSON logging from the app, CloudWatch Log Insights can query
-error patterns across time windows.
+The first signal something is wrong would be ALB target group health checks — when
+`/health` stops returning 200, tasks get marked unhealthy and you know quickly. From
+there, CloudWatch Container Insights covers CPU, memory, and task restarts. I'd set an
+ALB 5xx alarm at >1% over 5 minutes pointing to SNS so it pages someone rather than
+waiting for a user to report it.
 
-To roll back a bad deploy: because image tags should be commit SHAs, rollback means
-re-deploying the previous SHA. In the pipeline, re-run the deploy job with the prior
-commit as `image_tag`. ECS does a rolling replacement — new task definition pointing
-to the old image, old tasks drained after new ones pass health checks. If the task
-definition itself is the problem, ECS keeps all previous revisions and you can force
-it via `aws ecs update-service --task-definition <family>:<previous-revision>`.
+Rollback depends on image tagging being done right — which it currently isn't. Once
+image tags are commit SHAs, rolling back is just re-deploying the previous SHA. ECS
+handles it as a rolling replacement: new task definition, old image, old tasks drained
+after health checks pass. If the task definition itself is the problem, ECS keeps all
+previous revisions — you can force one with
+`aws ecs update-service --task-definition <family>:<previous-revision>`.
 
 ---
 
 ## What I'd Do With More Time
 
-- Move ECS tasks to private subnets with NAT Gateway — tasks should not be directly
-  reachable from the internet
-- Add HTTPS with ACM certificate on the ALB and redirect HTTP to HTTPS
-- Replace static AWS credentials in the pipeline with OIDC — no long-lived keys stored
-  in GitHub Secrets
-- Add S3 remote backend with DynamoDB locking for Terraform state
-- Move `DB_PASSWORD` to AWS Secrets Manager and reference it in the ECS task definition
-- Pin Flask version in requirements.txt and add `pip audit` in CI to catch known CVEs
-- Add ECR image scanning with a pipeline gate that fails on HIGH/CRITICAL findings
-- Add structured JSON logging to the Flask app for better CloudWatch integration
+The unfixed items I care most about, in order:
+
+- **OIDC instead of static AWS credentials** in the pipeline — long-lived keys in
+  GitHub Secrets are an accident waiting to happen
+- **S3 remote backend with DynamoDB locking** — local state means the next person
+  who runs `terraform apply` on a different machine is working blind
+- **Private subnets for ECS tasks** — right now tasks have public IPs, which means
+  they're reachable directly, not just through the ALB
+- **HTTPS on the ALB** — HTTP-only in production is not acceptable for anything
+  handling real user data
+- **`DB_PASSWORD` into Secrets Manager** — it's still a plaintext variable default
+  that ends up in the state file
+- **Pin Flask and add `pip audit` in CI** — unpinned dependencies plus no CVE
+  scanning is how you get surprised
+- **ECR image scanning** with a pipeline gate on HIGH/CRITICAL findings
